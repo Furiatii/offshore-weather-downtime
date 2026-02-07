@@ -1,6 +1,6 @@
 # Quantos dias o mar "fecha" na costa do RJ?
 
-Dashboard interativo que analisa dados meteorológicos reais do INMET (2019-2023) para estimar quantos dias por ano as condições climáticas impedem operações offshore na costa do Rio de Janeiro.
+Dashboard interativo que analisa dados meteorológicos reais do INMET (2019-2024) para estimar quantos dias por ano as condições climáticas impedem operações offshore na costa do Rio de Janeiro.
 
 **[Acessar o dashboard](https://offshore-weather-downtime.streamlit.app)**
 

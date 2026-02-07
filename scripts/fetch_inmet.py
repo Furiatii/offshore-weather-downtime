@@ -72,8 +72,8 @@ def main():
         "--years",
         nargs="+",
         type=int,
-        default=[2019, 2020, 2021, 2022, 2023],
-        help="Years to download (default: 2019-2023)",
+        default=[2019, 2020, 2021, 2022, 2023, 2024],
+        help="Years to download (default: 2019-2024)",
     )
     parser.add_argument(
         "--data-dir",

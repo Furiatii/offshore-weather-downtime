@@ -166,7 +166,7 @@ st.markdown("""
 <div class="header-container">
     <h1>Quantos dias o mar "fecha" na costa do RJ?</h1>
     <p>
-        Análise de dados meteorológicos reais (INMET, 2019-2023) para estimar
+        Análise de dados meteorológicos reais (INMET, 2019-2024) para estimar
         janelas de downtime em operações offshore na Bacia de Campos e arredores.
     </p>
 </div>
@@ -555,7 +555,7 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #94A3B8; font-size: 0.85rem; padding: 1rem 0;">
-    Dados: INMET (estações automáticas costeiras do RJ, 2019-2023) |
+    Dados: INMET (estações automáticas costeiras do RJ, 2019-2024) |
     Limites operacionais: NORMAM-01 / Noble Denton |
     Desenvolvido por <a href="https://linkedin.com/in/gabrielfuriati" style="color: #0369A1;">Gabriel Furiati</a>
 </div>
