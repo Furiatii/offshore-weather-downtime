@@ -17,6 +17,7 @@ from analysis.processor import load_all_stations, ms_to_knots, STATION_META
 from analysis.thresholds import (
     OPERATIONS,
     calculate_downtime,
+    calculate_downtime_custom,
     daily_downtime_summary,
 )
 
@@ -144,20 +145,17 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 
 @st.cache_data(show_spinner="Carregando dados do INMET...")
-def load_data():
-    df = load_all_stations(DATA_DIR)
-    df = calculate_downtime(df)
-    daily = daily_downtime_summary(df)
-    return df, daily
+def load_raw():
+    return load_all_stations(DATA_DIR)
 
 
 try:
-    hourly, daily = load_data()
+    raw_df = load_raw()
 except Exception as e:
     st.error(f"Erro ao carregar dados: {e}")
     st.stop()
 
-if hourly.empty:
+if raw_df.empty:
     st.warning("Nenhum dado encontrado na pasta data/.")
     st.stop()
 
@@ -176,42 +174,83 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### Filtros")
 
-    stations = sorted(daily["estacao"].unique())
-    station_labels = {s: f"{s} - {STATION_META.get(s, {}).get('name', s)}" for s in stations}
+    all_stations = sorted(raw_df["estacao"].unique())
+    station_labels = {s: f"{s} - {STATION_META.get(s, {}).get('name', s)}" for s in all_stations}
     selected_stations = st.multiselect(
         "Estações",
-        options=stations,
-        default=stations,
+        options=all_stations,
+        default=all_stations,
         format_func=lambda x: station_labels[x],
     )
 
-    years = sorted(daily["year"].unique())
+    all_years = sorted(raw_df["datetime"].dt.year.unique())
     selected_years = st.multiselect(
-        "Anos", options=years, default=years
-    )
-
-    operation_names = list(OPERATIONS.keys())
-    selected_op = st.selectbox(
-        "Operação de referência",
-        options=operation_names,
-        index=0,
-        help="Cada tipo de operação tem limites de vento e chuva diferentes.",
+        "Anos", options=all_years, default=all_years
     )
 
     st.markdown("---")
-    st.markdown("### Limites operacionais")
-    limits = OPERATIONS[selected_op]
-    st.markdown(f"**{selected_op}**")
-    st.markdown(f"- Vento: {limits['vento_max_ms']:.1f} m/s ({ms_to_knots(limits['vento_max_ms']):.0f} kt)")
-    st.markdown(f"- Rajada: {limits['rajada_max_ms']:.1f} m/s ({ms_to_knots(limits['rajada_max_ms']):.0f} kt)")
-    st.markdown(f"- Chuva: {limits['chuva_max_mm']:.0f} mm/h")
+    st.markdown("### Parâmetros de downtime")
+
+    operation_names = list(OPERATIONS.keys())
+    selected_op = st.selectbox(
+        "Preset de operação",
+        options=operation_names,
+        index=0,
+        help="Selecione uma operação para carregar os limites padrão. Depois, ajuste como quiser.",
+    )
+
+    preset = OPERATIONS[selected_op]
+
+    vento_max = st.slider(
+        "Vento sustentado máx (m/s)",
+        min_value=5.0,
+        max_value=25.0,
+        value=preset["vento_max_ms"],
+        step=0.5,
+        help=f"Padrão {selected_op}: {preset['vento_max_ms']} m/s ({ms_to_knots(preset['vento_max_ms']):.0f} kt)",
+    )
+    st.caption(f"{ms_to_knots(vento_max):.0f} nós")
+
+    rajada_max = st.slider(
+        "Rajada máx (m/s)",
+        min_value=5.0,
+        max_value=30.0,
+        value=preset["rajada_max_ms"],
+        step=0.5,
+        help=f"Padrão {selected_op}: {preset['rajada_max_ms']} m/s ({ms_to_knots(preset['rajada_max_ms']):.0f} kt)",
+    )
+    st.caption(f"{ms_to_knots(rajada_max):.0f} nós")
+
+    chuva_max = st.slider(
+        "Precipitação máx (mm/h)",
+        min_value=1.0,
+        max_value=30.0,
+        value=preset["chuva_max_mm"],
+        step=1.0,
+        help=f"Padrão {selected_op}: {preset['chuva_max_mm']} mm/h",
+    )
+
+    min_hours = st.slider(
+        "Horas mínimas p/ dia de downtime",
+        min_value=1,
+        max_value=12,
+        value=4,
+        step=1,
+        help="Quantas horas acima dos limites para contar o dia inteiro como downtime.",
+    )
 
     st.markdown("---")
     st.markdown(
         "<small>Dados: INMET (estações automáticas)<br>"
-        "Limites: NORMAM-01 / Noble Denton</small>",
+        "Limites padrão: NORMAM-01 / Noble Denton</small>",
         unsafe_allow_html=True,
     )
+
+# ── Compute downtime with user params ────────────────────────
+hourly = calculate_downtime_custom(raw_df, vento_max, rajada_max, chuva_max)
+# Also compute for all preset operations (used in tab 4)
+hourly = calculate_downtime(hourly)
+daily = daily_downtime_summary(hourly, min_hours=min_hours)
 
 # ── Filter data ──────────────────────────────────────────────
 mask_d = daily["estacao"].isin(selected_stations) & daily["year"].isin(selected_years)
@@ -220,8 +259,9 @@ filtered_daily = daily[mask_d].copy()
 mask_h = hourly["estacao"].isin(selected_stations) & hourly["datetime"].dt.year.isin(selected_years)
 filtered_hourly = hourly[mask_h].copy()
 
-dt_col = f"downtime_{selected_op}"
-dt_day_col = f"downtime_{selected_op}_day"
+# Custom thresholds column
+dt_col = "downtime"
+dt_day_col = "downtime_day"
 
 if filtered_daily.empty:
     st.warning("Nenhum dado com os filtros selecionados.")
@@ -242,7 +282,7 @@ st.markdown(f"""
     </div>
     <div class="metric-card warn">
         <div class="value">{downtime_days:,}</div>
-        <div class="label">Dias com downtime ({selected_op})</div>
+        <div class="label">Dias com downtime</div>
     </div>
     <div class="metric-card highlight">
         <div class="value">{pct_downtime:.1f}%</div>
@@ -262,11 +302,12 @@ st.markdown(f"""
 # ── Context ──────────────────────────────────────────────────
 st.markdown(f"""
 <div class="context-box">
-    <strong>O que isso significa?</strong> Um dia conta como "downtime" quando pelo menos 4 horas
-    naquele dia excederam os limites para <em>{selected_op}</em>.
-    Vento sustentado acima de {ms_to_knots(limits['vento_max_ms']):.0f} nós,
-    rajadas acima de {ms_to_knots(limits['rajada_max_ms']):.0f} nós ou
-    precipitação acima de {limits['chuva_max_mm']:.0f} mm/h já inviabilizam a operação.
+    <strong>Critérios atuais:</strong> Um dia conta como "downtime" quando pelo menos <strong>{min_hours}h</strong>
+    naquele dia excederam os limites definidos na sidebar:
+    vento sustentado &gt; <strong>{vento_max} m/s</strong> ({ms_to_knots(vento_max):.0f} kt),
+    rajada &gt; <strong>{rajada_max} m/s</strong> ({ms_to_knots(rajada_max):.0f} kt) ou
+    precipitação &gt; <strong>{chuva_max} mm/h</strong>.
+    Ajuste os parâmetros para simular cenários diferentes.
 </div>
 """, unsafe_allow_html=True)
 

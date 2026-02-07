@@ -34,27 +34,36 @@ OPERATIONS = {
 }
 
 
+def classify_hour_custom(row: pd.Series, vento_max: float, rajada_max: float, chuva_max: float) -> bool:
+    """Check if a single hourly reading exceeds custom limits.
+
+    Returns True if conditions are ABOVE limits (= downtime).
+    """
+    wind_exceeded = (
+        pd.notna(row.get("vento_vel_ms"))
+        and row["vento_vel_ms"] > vento_max
+    )
+    gust_exceeded = (
+        pd.notna(row.get("vento_rajada_ms"))
+        and row["vento_rajada_ms"] > rajada_max
+    )
+    rain_exceeded = (
+        pd.notna(row.get("precipitacao_mm"))
+        and row["precipitacao_mm"] > chuva_max
+    )
+
+    return wind_exceeded or gust_exceeded or rain_exceeded
+
+
 def classify_hour(row: pd.Series, operation: str) -> bool:
     """Check if a single hourly reading exceeds operational limits.
 
     Returns True if conditions are ABOVE limits (= downtime).
     """
     limits = OPERATIONS[operation]
-
-    wind_exceeded = (
-        pd.notna(row.get("vento_vel_ms"))
-        and row["vento_vel_ms"] > limits["vento_max_ms"]
+    return classify_hour_custom(
+        row, limits["vento_max_ms"], limits["rajada_max_ms"], limits["chuva_max_mm"]
     )
-    gust_exceeded = (
-        pd.notna(row.get("vento_rajada_ms"))
-        and row["vento_rajada_ms"] > limits["rajada_max_ms"]
-    )
-    rain_exceeded = (
-        pd.notna(row.get("precipitacao_mm"))
-        and row["precipitacao_mm"] > limits["chuva_max_mm"]
-    )
-
-    return wind_exceeded or gust_exceeded or rain_exceeded
 
 
 def calculate_downtime(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,10 +78,20 @@ def calculate_downtime(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def daily_downtime_summary(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_downtime_custom(df: pd.DataFrame, vento_max: float, rajada_max: float, chuva_max: float) -> pd.DataFrame:
+    """Add a single 'downtime' column using custom thresholds."""
+    result = df.copy()
+    result["downtime"] = result.apply(
+        lambda row: classify_hour_custom(row, vento_max, rajada_max, chuva_max), axis=1
+    )
+    return result
+
+
+def daily_downtime_summary(df: pd.DataFrame, min_hours: int = 4) -> pd.DataFrame:
     """Aggregate hourly downtime to daily counts.
 
     Returns a DataFrame with date, station, and hours of downtime per operation.
+    min_hours: minimum hours exceeded to count a day as "downtime day".
     """
     if "datetime" not in df.columns:
         return pd.DataFrame()
@@ -80,7 +99,7 @@ def daily_downtime_summary(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["date"] = df["datetime"].dt.date
 
-    downtime_cols = [c for c in df.columns if c.startswith("downtime_")]
+    downtime_cols = [c for c in df.columns if c.startswith("downtime")]
 
     agg = {"vento_vel_ms": "max", "vento_rajada_ms": "max", "precipitacao_mm": "sum"}
     for col in downtime_cols:
@@ -91,8 +110,7 @@ def daily_downtime_summary(df: pd.DataFrame) -> pd.DataFrame:
     daily["month"] = daily["date"].dt.month
     daily["year"] = daily["date"].dt.year
 
-    # A day counts as "downtime day" if >= 4 hours exceeded limits
     for col in downtime_cols:
-        daily[f"{col}_day"] = daily[col] >= 4
+        daily[f"{col}_day"] = daily[col] >= min_hours
 
     return daily
